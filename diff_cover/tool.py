@@ -17,7 +17,8 @@ from diff_cover.git_diff import GitDiffTool
 from diff_cover.git_path import GitPathTool
 from diff_cover.report_generator import (
     HtmlReportGenerator, StringReportGenerator,
-    HtmlQualityReportGenerator, StringQualityReportGenerator
+    HtmlQualityReportGenerator, StringQualityReportGenerator,
+    report_generator_factory
 )
 from diff_cover.violationsreporters.base import QualityReporter
 from diff_cover.violationsreporters.violations_reporter import (
@@ -53,6 +54,7 @@ FAIL_UNDER_HELP = "Returns an error code if coverage or quality score is below t
 IGNORE_STAGED_HELP = "Ignores staged changes"
 IGNORE_UNSTAGED_HELP = "Ignores unstaged changes"
 EXCLUDE_HELP = "Exclude files, more patterns supported"
+CUSTOM_REPORT_HELP = "Custom report output and args"
 
 
 LOGGER = logging.getLogger(__name__)
@@ -96,6 +98,13 @@ def parse_coverage_args(argv):
         type=str,
         default=None,
         help=CSS_FILE_HELP,
+    )
+
+    parser.add_argument(
+        '--custom-report',
+        metavar='REPORT',
+        action='append',
+        help=CUSTOM_REPORT_HELP
     )
 
     parser.add_argument(
@@ -237,8 +246,51 @@ def parse_quality_args(argv):
     return vars(parser.parse_args(argv))
 
 
+def generate_report(generator_class, coverage, diff, report_file, css_file=None):
+    """
+    Generates a report given the report generator class, coverage information, and output file names.
+    """
+    css_url = css_file
+    if css_url is not None:
+        css_url = os.path.relpath(css_file, os.path.dirname(report_file))
+    reporter = generator_class(coverage, diff, css_url=css_url)
+    with open(report_file, "wb") as output_file:
+        reporter.generate_report(output_file)
+    if css_file is not None:
+        with open(css_file, "wb") as output_file:
+            reporter.generate_css(output_file)
+
+
+def generate_custom_report(coverage, diff, report_args):
+    """
+    Generates a custom report given coverage information and a report argument string.
+
+    The report argument string has the format:
+
+        report_file(,css_file)(,template=report.j2)(,css_template=css.j2)(,snippets=(true|false))
+
+    Example report arguments:
+
+        # Text report
+        report.txt,template=report.j2
+
+        # HTML report with external css and snippets
+        report.html,report.css,template=report.j2,css_template=styles.j2,snippets=true
+    """
+    report_files = [arg for arg in report_args.split(',') if '=' not in arg]
+    generator_args = dict((arg.split('=', 1) for arg in report_args.split(',') if '=' in arg))
+    template = generator_args.pop('template', 'console_coverage_report.txt')
+    if 'snippets' in generator_args:
+        generator_args['snippets'] = generator_args['snippets'].lower() in ('1', 'true')
+    generate_report(report_generator_factory(template, **generator_args),
+                    coverage,
+                    diff,
+                    *report_files[:2])
+
+
 def generate_coverage_report(coverage_xml, compare_branch,
                              html_report=None, css_file=None,
+                             custom_reports=None,
                              ignore_staged=False, ignore_unstaged=False,
                              exclude=None):
     """
@@ -258,18 +310,11 @@ def generate_coverage_report(coverage_xml, compare_branch,
     elif cobertura_xml_roots:
         coverage = XmlCoverageReporter(cobertura_xml_roots)
 
-
-    # Build a report generator
     if html_report is not None:
-        css_url = css_file
-        if css_url is not None:
-            css_url = os.path.relpath(css_file, os.path.dirname(html_report))
-        reporter = HtmlReportGenerator(coverage, diff, css_url=css_url)
-        with open(html_report, "wb") as output_file:
-            reporter.generate_report(output_file)
-        if css_file is not None:
-            with open(css_file, "wb") as output_file:
-                reporter.generate_css(output_file)
+        generate_report(HtmlReportGenerator, coverage, diff, html_report, css_file)
+
+    for custom_report in custom_reports:
+        generate_custom_report(coverage, diff, custom_report)
 
     reporter = StringReportGenerator(coverage, diff)
     output_file = sys.stdout if six.PY2 else sys.stdout.buffer
@@ -342,6 +387,7 @@ def main(argv=None, directory=None):
             arg_dict['coverage_xml'],
             arg_dict['compare_branch'],
             html_report=arg_dict['html_report'],
+            custom_reports=arg_dict['custom_report'],
             css_file=arg_dict['external_css_file'],
             ignore_staged=arg_dict['ignore_staged'],
             ignore_unstaged=arg_dict['ignore_unstaged'],

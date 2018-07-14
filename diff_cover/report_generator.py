@@ -3,9 +3,10 @@ Classes for generating diff coverage reports.
 """
 from __future__ import unicode_literals
 from abc import ABCMeta, abstractmethod
-from jinja2 import Environment, PackageLoader
+from jinja2 import Environment, PackageLoader, ChoiceLoader, FileSystemLoader
 from jinja2_pluralize import pluralize_dj
 from diff_cover.snippets import Snippet
+import os
 import six
 
 
@@ -179,7 +180,10 @@ class BaseReportGenerator(object):
 
 
 # Set up the template environment
-TEMPLATE_LOADER = PackageLoader(__package__)
+TEMPLATE_LOADER = ChoiceLoader([
+    PackageLoader(__package__),
+    FileSystemLoader([os.path.abspath(os.sep), os.getcwd()]),
+])
 TEMPLATE_ENV = Environment(loader=TEMPLATE_LOADER,
                            trim_blocks=True,
                            lstrip_blocks=True)
@@ -364,3 +368,16 @@ class HtmlQualityReportGenerator(TemplateReportGenerator):
     TEMPLATE_NAME = "html_quality_report.html"
     CSS_TEMPLATE_NAME = "external_style.css"
     INCLUDE_SNIPPETS = True
+
+
+def report_generator_factory(template,
+                             css_template=None,
+                             snippets=False):
+    """
+    Create a report generator class that uses custom Jinja2 templates.
+    """
+    return type(str('CustomReportGenerator'),
+                (TemplateReportGenerator,),
+                dict(TEMPLATE_NAME=template,
+                     CSS_TEMPLATE_NAME=css_template,
+                     INCLUDE_SNIPPETS=snippets))
