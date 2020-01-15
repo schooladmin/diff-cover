@@ -3,3 +3,6 @@ Jinja2>=2.7.1
 six>=1.6.1
 jinja2_pluralize
 pygments
+
+# newer versions of inflect have dependencies that break for python 2.7
+inflect==2.1.0
